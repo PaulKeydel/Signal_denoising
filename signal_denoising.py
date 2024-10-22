@@ -13,10 +13,10 @@ def generateNoise(N, alpha = 0.0):
     if alpha == 0:
         return x
     else:
-        numUniquePts = int(np.ceil((N+1)/2))
+        numUniquePts = int(np.ceil((N + 1) / 2))
         #x_ = np.fft.rfft(x, N)
         x_ = np.fft.fft(x, N)[0:numUniquePts]
-        s_ = np.power(np.arange(1, numUniquePts + 1, dtype='int'), alpha/2)
+        s_ = np.power(np.arange(1, numUniquePts + 1, dtype="int"), alpha/2)
         x_ = x_ * s_
         #x_ = np.fft.irfft(x_, N).real
         if N % 2 == 0:
@@ -28,13 +28,14 @@ def generateNoise(N, alpha = 0.0):
         x_ = (x_ - np.mean(x_)) / v_
         return x_
 
-#denoising with Fourier transform
+#denoising a real-valued signal f with Fourier transform
 def filter_fourier(f, N, thr):
+    sym_part = int(np.ceil((N + 1) / 2))
     fhat = np.fft.fft(f, N)
     psd = np.real_if_close(fhat * np.conj(fhat)) / N
     indices = psd > thr
     fhat = fhat * indices
-    return psd, np.fft.ifft(fhat).real
+    return psd[:sym_part], np.fft.ifft(fhat).real
 
 #function to save the signal as audio file
 def to_wave_file(signal_vector, sample_rate, filename):
@@ -68,7 +69,7 @@ def stft1D(f, fft_size, overlap_fac, window):
         segment = f_pad[current_pos:(current_pos + fft_size)]
         spectrum = np.fft.rfft(segment * window)
         result[i, :] = (abs(spectrum) * abs(spectrum)).real
-    return result, unique_pts
+    return result
 
 #set sampling frequency fs and temporal length of the signal in seconds
 samplerate = 44100
@@ -85,41 +86,49 @@ to_wave_file(f, samplerate, "orig.wav")
 to_wave_file(f_noise, samplerate, "orig_noisy.wav")
 
 #filter out noise in frequency domain and save it to wav-file
-L = int(np.ceil((n + 1) / 2))
 psd, ffilt1 = filter_fourier(f_noise, n, 2000)
 to_wave_file(ffilt1, samplerate, "filt1.wav")
 psd, ffilt2 = filter_fourier(f_noise, n, 7000)
 to_wave_file(ffilt2, samplerate, "filt2.wav")
+L = len(psd)
 
 #plot
-fig, axs = plt.subplots(3, 1, figsize=(8, 8))
+fig, axs = plt.subplots(3, 1, figsize=(6, 8))
 plt_time_range = np.arange(samplerate - 500, samplerate + 500, 1).tolist()
+freqs = np.arange(0, L) / t_max
 
 plt.sca(axs[0])
-plt.plot(t[plt_time_range], f_noise[plt_time_range], color = 'c', label = 'noisy')
-plt.plot(t[plt_time_range], f[plt_time_range], color = 'k', label = 'clean')
+plt.plot(t[plt_time_range], f_noise[plt_time_range], color = "c", label = "noisy")
+plt.plot(t[plt_time_range], f[plt_time_range], color = "k", label = "clean")
+plt.xlabel("Moment in time (s)")
 plt.legend()
 
 plt.sca(axs[1])
-plt.plot(psd[:L], color = 'c', label = 'power spectrum density')
-plt.plot([2000] * L, color='orange', linestyle='dashed')
-plt.plot([7000] * L, color='blue', linestyle='dashed')
-plt.xticks(np.arange(0, L, 4000), ((samplerate/n) * np.arange(0, L, 4000)).astype(int))
+plt.plot(freqs, psd, color = "c", label = "power spectrum density")
+plt.plot(freqs, [2000] * L, color="orange", linestyle="dashed")
+plt.plot(freqs, [7000] * L, color="blue", linestyle="dashed")
+plt.xlabel("Frequency (Hertz)")
 plt.legend()
 
 plt.sca(axs[2])
-plt.plot(t[plt_time_range], ffilt1[plt_time_range], color = 'orange', label = 'filtered, thr = 2000')
-plt.plot(t[plt_time_range], ffilt2[plt_time_range], color = 'blue', label = 'filtered, thr = 7000')
+plt.plot(t[plt_time_range], ffilt1[plt_time_range], color = "orange", label = "filtered, thr = 2000")
+plt.plot(t[plt_time_range], ffilt2[plt_time_range], color = "blue", label = "filtered, thr = 7000")
+plt.xlabel("Moment in time (s)")
 plt.legend()
 
+plt.tight_layout()
 plt.savefig("denoising_demo.svg", format="svg", bbox_inches="tight")
 plt.show()
 
-stft, L = stft1D(f_noise, 1000, 0, np.hanning(1000))
-#plotting everything
-img = plt.imshow(stft, origin='lower', cmap='jet', interpolation='nearest', aspect='auto')
-plt.xticks(np.arange(0, L, 20),
-           np.around((samplerate / 1000) * np.arange(0, L, 20)).astype(int),
-           rotation='vertical')
+#do the short-term FT with a window of temporal size <t_window>
+t_window = 0.02
+n_samples = int(samplerate * t_window)
+stft = stft1D(f_noise, n_samples, 0, np.hanning(n_samples))
+L = stft.shape[1]
+plt.imshow(stft, origin="lower", cmap="jet", interpolation="none", aspect="auto", extent=[0, L/t_window, 0, t_max])
+#plt.colorbar()
+plt.xlabel("Frequency [Hz]")
+plt.ylabel("Time [s]")
+plt.title("Time resolution via a short-term Fourier Transform (window size = " + str(t_window) + "s)")
 plt.savefig("stft.svg", format="svg", bbox_inches="tight")
 plt.show()
