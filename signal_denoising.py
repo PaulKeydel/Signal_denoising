@@ -52,24 +52,59 @@ def to_wave_file(signal_vector, sample_rate, filename):
         f.setframerate(sample_rate)
         f.writeframes(audio.tobytes())
 
+def get_nonzero_window(window_type: str, window_size: int) -> np.float32:
+    window = np.ones(window_size, dtype=np.float32)
+    if window_type == "hann":
+        window = np.hanning(window_size + 2)[1:(window_size + 1)]
+    assert(len(window) == window_size)
+    return window
+
 #compute short-term Fourier transform
-def stft1D(f, fft_size, overlap_fac, window):
-    assert(len(window) == fft_size)
+def stft1D(f, fft_size, overlap_fac, window_type):
+    window = get_nonzero_window(window_type, fft_size)
     segment_offset = np.int32(np.floor(fft_size * (1 - overlap_fac)))
     total_segments = np.int32(np.ceil(len(f) / segment_offset))
     unique_pts = int(np.ceil((fft_size + 1) / 2))
     #zero-padding at the end of signal f
     f_pad = np.concatenate((f, np.zeros(fft_size)))
     #space to hold the result
-    result = np.empty((total_segments, unique_pts), dtype=np.float32)
+    coeffs = np.empty((total_segments, unique_pts), dtype=np.complex64)
+    psd = np.empty((total_segments, unique_pts), dtype=np.float32)
 
     #iterate over all segments and take the Fourier Transform
     for i in range(total_segments):
-        current_pos = segment_offset * i
-        segment = f_pad[current_pos:(current_pos + fft_size)]
+        start = segment_offset * i
+        stop = segment_offset * i + fft_size
+        segment = f_pad[start:stop]
         spectrum = np.fft.rfft(segment * window)
-        result[i, :] = (abs(spectrum) * abs(spectrum)).real
-    return result
+        coeffs[i, :] = spectrum
+        psd[i, :] = (abs(spectrum) * abs(spectrum)).real
+    return coeffs, psd
+
+#inverse short-term Fourier transform
+def istft1D(coeffs, fft_size, signal_length, overlap_fac, window_type):
+    window = get_nonzero_window(window_type, fft_size)
+    segment_offset = np.int32(np.floor(fft_size * (1 - overlap_fac)))
+    total_segments = np.int32(np.ceil(signal_length / segment_offset))
+
+    #space to hold the result
+    reco = np.zeros(signal_length, dtype=np.float64)
+    window_overlap_add = np.zeros(signal_length)
+    #iterate over all segments and take the Fourier Transform
+    for i in range(total_segments):
+        start = segment_offset * i
+        stop = min(start + fft_size, signal_length)
+        segment = coeffs[i, :]
+        reco[start:stop] += (np.fft.irfft(segment) * window)[0:(stop-start)]
+        window_overlap_add[start:stop] += (window ** 2)[0:(stop-start)]
+    window_overlap_add = window_overlap_add ** -1
+    return reco * window_overlap_add
+
+def filter_stft(f, window_size, overlap_fac, window_type, thr):
+    fcoeffs, psd = stft1D(f, window_size, overlap_fac, window_type)
+    fcoeffs = fcoeffs * (psd > thr)
+    reco = istft1D(fcoeffs, window_size, len(f), overlap_fac, window_type)
+    return psd, reco
 
 #set sampling frequency fs and temporal length of the signal in seconds
 samplerate = 44100
@@ -123,12 +158,32 @@ plt.show()
 #do the short-term FT with a window of temporal size <t_window>
 t_window = 0.02
 n_samples = int(samplerate * t_window)
-stft = stft1D(f_noise, n_samples, 0, np.hanning(n_samples))
-L = stft.shape[1]
-plt.imshow(stft, origin="lower", cmap="jet", interpolation="none", aspect="auto", extent=[0, L/t_window, 0, t_max])
+psd, reco = filter_stft(f_noise, n_samples, 0.5, "hann", 30000)
+L = psd.shape[1]
+
+fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+
+plt.sca(axs[0, 0])
+plt.plot(t[plt_time_range], f_noise[plt_time_range], color = "c", label = "noisy")
+plt.xlabel("Moment in time (s)")
+plt.legend()
+
+plt.sca(axs[0, 1])
+plt.imshow(psd, origin="lower", cmap="jet", interpolation="none", aspect="auto", extent=[0, L/t_window, 0, t_max])
 #plt.colorbar()
 plt.xlabel("Frequency [Hz]")
 plt.ylabel("Time [s]")
-plt.title("Time resolution via a short-term Fourier Transform (window size = " + str(t_window) + "s)")
+
+plt.sca(axs[1, 0])
+plt.plot(t[plt_time_range], f[plt_time_range], color = "c", label = "clean")
+plt.xlabel("Moment in time (s)")
+plt.legend()
+
+plt.sca(axs[1, 1])
+plt.plot(t[plt_time_range], reco[plt_time_range], color = "c", label = "filtered")
+plt.xlabel("Moment in time (s)")
+plt.legend()
+
+fig.suptitle("Time resolution via a short-term Fourier Transform (window size = " + str(t_window) + "s)", fontsize=14)
 plt.savefig("stft.svg", format="svg", bbox_inches="tight")
 plt.show()
