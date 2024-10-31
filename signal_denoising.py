@@ -95,7 +95,7 @@ def istft1D(coeffs, fft_size, signal_length, overlap_fac, window_type):
         start = segment_offset * i
         stop = min(start + fft_size, signal_length)
         segment = coeffs[i, :]
-        reco[start:stop] += (np.fft.irfft(segment) * window)[0:(stop-start)]
+        reco[start:stop] += (np.fft.irfft(segment, fft_size) * window)[0:(stop-start)]
         window_overlap_add[start:stop] += (window ** 2)[0:(stop-start)]
     window_overlap_add = window_overlap_add ** -1
     return reco * window_overlap_add
@@ -157,30 +157,26 @@ plt.show()
 
 #do the short-term FT with a window of temporal size <t_window>
 t_window = 0.02
-n_samples = int(samplerate * t_window)
-psd, reco = filter_stft(f_noise, n_samples, 0.5, "hann", 30000)
+psd, reco = filter_stft(f_noise, int(samplerate * t_window), 0.5, "hann", 30000)
 L = psd.shape[1]
 
-fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+fig, axs = plt.subplot_mosaic([['left', 'right'], ['bottom', 'bottom']], figsize=(10, 8))
 
-plt.sca(axs[0, 0])
+plt.sca(axs["left"])
 plt.plot(t[plt_time_range], f_noise[plt_time_range], color = "c", label = "noisy")
+plt.plot(t[plt_time_range], f[plt_time_range], color = "k", label = "clean")
 plt.xlabel("Moment in time (s)")
 plt.legend()
 
-plt.sca(axs[0, 1])
+plt.sca(axs["right"])
 plt.imshow(psd, origin="lower", cmap="jet", interpolation="none", aspect="auto", extent=[0, L/t_window, 0, t_max])
 #plt.colorbar()
 plt.xlabel("Frequency [Hz]")
 plt.ylabel("Time [s]")
 
-plt.sca(axs[1, 0])
-plt.plot(t[plt_time_range], f[plt_time_range], color = "c", label = "clean")
-plt.xlabel("Moment in time (s)")
-plt.legend()
-
-plt.sca(axs[1, 1])
-plt.plot(t[plt_time_range], reco[plt_time_range], color = "c", label = "filtered")
+plt.sca(axs["bottom"])
+plt_time_range = np.arange(samplerate - 1000, samplerate + 1000, 1).tolist()
+plt.plot(t[plt_time_range], reco[plt_time_range], color = "lightblue", label = "filtered")
 plt.xlabel("Moment in time (s)")
 plt.legend()
 
